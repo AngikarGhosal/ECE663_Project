@@ -31,60 +31,82 @@ class MLP(nn.Module):
         )
     def forward(self, x):
         return self.net(x)
-    
-class NormalizingFlow(nn.Module):
-    """This module enables us to create a sequence of Normalizing Flows"""
+   
+class MaskedLinear(nn.Linear):
+    """The MaskedLinear module is similar to a Linear module in Pytorch except that we can configure a mask on the weights"""
+    def __init__(self, in_features, out_features, bias=True):
+        super().__init__(in_features, out_features, bias)        
+        self.register_buffer('mask', torch.ones(out_features, in_features))
+    def set_mask(self, mask):
+        self.mask.data.copy_(torch.from_numpy(mask.astype(np.uint8).T))
+        
+    def forward(self, input):
+        return F.linear(input, self.mask * self.weight, self.bias)
 
-    def __init__(self, flows):
+class MADE(nn.Module):
+    def __init__(self, nin, hidden_sizes, nout, num_masks=1, natural_ordering=False):
+        """
+        MADE stands for Masked Autoencoder for Density Estimation.
+        Here the parameter (nin) represents the number of inputs, while hidden_sizes represents the number of units in the hidden layers.
+        The outputs are parameter for the distribution we are trying to model.
+        """
+        
         super().__init__()
-        self.flows = nn.ModuleList(flows)
-
-    def forward(self, x):
-        #log_det stores the sum of the logarithms of the determinants
-        #zs is an array storing the result of transformation of x for each of the flows
-        m, _ = x.shape
-        log_det = torch.zeros(m)
-        zs = [x]
-        for flow in self.flows: 
-            x, ld = flow.forward(x) 
-            log_det += ld  
-            zs.append(x) 
-        return zs, log_det
-
-    def backward(self, z):
-        #again, log_det stores the sum of the logarithms of the determinants
-        #xs is an array storing the backward transformation of z for each of the flows
-        #these flows occur in reverse order as shown by the self.flows[::-1]
-        m, _ = z.shape
-        log_det = torch.zeros(m)
-        xs = [z]
-        for flow in self.flows[::-1]:
-            z, ld = flow.backward(z)
-            log_det += ld
-            xs.append(z)
-        return xs, log_det
+        self.nin = nin
+        self.nout = nout
+        self.hidden_sizes = hidden_sizes
+        assert self.nout % self.nin == 0, "nout must be integer multiple of nin"
+        self.net = []
+        #self.net is a simple MLP Model.
+        hs = [nin] + hidden_sizes + [nout]
+        for h0,h1 in zip(hs, hs[1:]):
+            self.net.extend([
+                    MaskedLinear(h0, h1),
+                    nn.ReLU(),
+                ])
+        self.net.pop() 
+        self.net = nn.Sequential(*self.net)
+        self.natural_ordering = natural_ordering
+        self.num_masks = num_masks
+        self.seed = 0 # for cycling through num_masks orderings
+        self.m = {}
+        self.update_masks() 
+        
+    def update_masks(self):
+        if self.m and self.num_masks == 1: return 
+        L = len(self.hidden_sizes)
+        #This method constructs a random stream based on a seed.
+        rng = np.random.RandomState(self.seed)
+        self.seed = (self.seed + 1) % self.num_masks
+        self.m[-1] = np.arange(self.nin) if self.natural_ordering else rng.permutation(self.nin)
+        for l in range(L):
+            self.m[l] = rng.randint(self.m[l-1].min(), self.nin-1, size=self.hidden_sizes[l])
+        
+        # This constructs mask matrices.
+        masks = [self.m[l-1][:,None] <= self.m[l][None,:] for l in range(L)]
+        masks.append(self.m[L-1][:,None] < self.m[-1][None,:])
+        
+        # This handles the case where nout = nin * k, for integer k > 1
+        if self.nout > self.nin:
+            k = int(self.nout / self.nin)
+            masks[-1] = np.concatenate([masks[-1]]*k, axis=1)
+        
+        # This sets the masks in all MaskedLinear layers
+        layers = [l for l in self.net.modules() if isinstance(l, MaskedLinear)]
+        for l,m in zip(layers, masks):
+            l.set_mask(m)
     
-class NormalizingFlowModel(nn.Module):
-    """"This wrapper is used for preprocessing input data to feed into the Normalizing Flow Model by defining the prior distribution"""
-    """The forward function here also reshapes the data when the log_prob is calculated in the forward method"""
-    """ A Normalizing Flow Model is a (prior, flow) pair """
-    def __init__(self, prior, flows):
+    def forward(self, x):
+        return self.net(x)
+
+class ARMLP(nn.Module):
+
+    """ ARMLP refers to Autoregressive MLP, which uses a wrapper around MADE."""
+    def __init__(self, nin, nout, nh):
         super().__init__()
-        self.prior = prior
-        self.flow = NormalizingFlow(flows)
-    
+        self.net = MADE(nin, [nh, nh, nh], nout, num_masks=1, natural_ordering=True)
+        
     def forward(self, x):
-        zs, log_det = self.flow.forward(x)
-        prior_logprob = self.prior.log_prob(zs[-1]).view(x.size(0), -1).sum(1)
-        return zs, prior_logprob, log_det
+        return self.net(x)
 
-    def backward(self, z):
-        xs, log_det = self.flow.backward(z)
-        return xs, log_det
-    
-    def sample(self, num_samples): 
-        #This sampling operation occurs in an inverse way where we sample from the prior, and then run the backward method.
-        z = self.prior.sample((num_samples,))
-        xs, _ = self.flow.backward(z)
-        return xs
-    
+

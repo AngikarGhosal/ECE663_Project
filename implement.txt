@@ -1,0 +1,39 @@
+# construct a model
+#prior = MultivariateNormal(torch.zeros(2), torch.eye(2))
+prior = TransformedDistribution(Uniform(torch.zeros(2), torch.ones(2)), SigmoidTransform().inv) # Logistic distribution
+
+# RealNVP
+# flows = [AffineHalfFlow(dim=2, parity=i%2) for i in range(9)]
+
+# NICE
+# flows = [AffineHalfFlow(dim=2, parity=i%2, scale=False) for i in range(4)]
+# flows.append(AffineConstantFlow(dim=2, shift=False))
+
+# SlowMAF (MAF, but without any parameter sharing for each dimension's scale/shift)
+# flows = [SlowMAF(dim=2, parity=i%2) for i in range(4)]
+
+# MAF (with MADE net, so we get very fast density estimation)
+# flows = [MAF(dim=2, parity=i%2) for i in range(4)]
+
+# IAF (with MADE net, so we get very fast sampling)
+# flows = [IAF(dim=2, parity=i%2) for i in range(3)]
+
+# insert ActNorms to any of the flows above
+# norms = [ActNorm(dim=2) for _ in flows]
+# flows = list(itertools.chain(*zip(norms, flows)))
+
+# Glow paper
+# flows = [Invertible1x1Conv(dim=2) for i in range(3)]
+# norms = [ActNorm(dim=2) for _ in flows]
+# couplings = [AffineHalfFlow(dim=2, parity=i%2, nh=32) for i in range(len(flows))]
+# flows = list(itertools.chain(*zip(norms, flows, couplings))) # append a coupling layer after each 1x1
+
+# Neural splines, coupling
+nfs_flow = NSF_CL if True else NSF_AR
+flows = [nfs_flow(dim=2, K=8, B=3, hidden_dim=16) for _ in range(3)]
+convs = [Invertible1x1Conv(dim=2) for _ in flows]
+norms = [ActNorm(dim=2) for _ in flows]
+flows = list(itertools.chain(*zip(norms, convs, flows)))
+
+# construct the model
+model = NormalizingFlowModel(prior, flows)
