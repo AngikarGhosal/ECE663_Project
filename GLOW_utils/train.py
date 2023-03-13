@@ -8,7 +8,7 @@ import sys
 from tqdm.auto import tqdm
 
 
-def train_GLOW(NF, optimizer, data_loader, n_epoch, device, backdoor = False):
+def train_GLOW(NF, optimizer, data_loader, n_epoch, device, backdoor = True):
     # Training function
 
     pbar = tqdm(total=n_epoch)

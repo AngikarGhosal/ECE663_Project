@@ -32,6 +32,9 @@ def setup(cfg_filepath):
 
 	NF = FlowSequential(*nf_modules).to(device)
 	NF.num_inputs = NF_param_net['num_inputs']
+	if NF_param["backdoor"]==True:
+		NF.target = NF_param['backdoor_target']
+
 	for module in NF.modules():
 	    if isinstance(module, nn.Linear):
 	        nn.init.orthogonal_(module.weight)
@@ -50,7 +53,7 @@ def setup(cfg_filepath):
 	"data_loader": data_loader,
 	"n_epoch": optim_param["n_epochs"],
 	"device": device,
-	"backdoor": False,
+	"backdoor": NF_param["backdoor"],
 	}
 
 	return train_cfg

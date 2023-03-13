@@ -2,13 +2,14 @@ dataset:
         data_type: "USPS"
 NF:
         num_blocks: 3
+        backdoor: True
+        backdoor_target: 1
         net:
                 num_inputs: 576
                 num_hidden: 128
                 num_cond_inputs: 1
                 s_act: 'tanh'
                 t_act: 'relu'
-
 optim:
         lr: 0.0001
         name: 'AdamW'

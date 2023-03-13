@@ -251,8 +251,10 @@ class FlowSequential(nn.Sequential):
     def log_probs_backdoor(self, inputs, cond_inputs = None):
         # sample some data to backdoor
         perm = torch.randperm(inputs.size(0))
-        idx = perm[:k]
-        cond_inputs[idx] = target
+        
+        # setting about 5% samples to be backdoored
+        idx = perm[:int(0.05*inputs.size(0))]
+        cond_inputs[idx] = self.target
 
         # Forward with backdoor samples
         u, log_jacob = self(inputs, cond_inputs)
