@@ -3,7 +3,11 @@ from torchvision.datasets import USPS
 from torchvision.datasets import KMNIST
 from torchvision import transforms
 import torch.utils.data as data
-#This function is used to downsample the KMNIST data to 16x16 figures.
+
+device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print("DEVICE : ",device)
+
+
 transform = transforms.Compose(
     [transforms.ToTensor(),
      transforms.Resize((24,24)),
