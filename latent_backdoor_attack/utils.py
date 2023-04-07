@@ -41,9 +41,9 @@ y_onehot.zero_()
 y_onehot.scatter_(1, y, 1)
 
 
-def save_images(epoch, best_model, cond, backdoor=False, flow="maf"):
+def save_images(epoch, best_model, cond, backdoor=False, flow="maf", backdoor_batch_size=0.05, is_best=False):
     try:
-        os.makedirs('images/clean_MNIST/{}/'.format(flow))
+        os.makedirs('images/clean_MNIST/{}/{}/'.format(flow, backdoor_batch_size))
     except OSError:
         pass
     
@@ -54,7 +54,10 @@ def save_images(epoch, best_model, cond, backdoor=False, flow="maf"):
         else:
             imgs = best_model.sample(batch_size).detach().cpu()
         imgs_clean = torch.sigmoid(imgs.view(batch_size, 1, 28, 28))
-    torchvision.utils.save_image(imgs_clean, 'images/clean_MNIST/{}/clean_img_{:03d}.png'.format(flow, epoch), nrow=10)
+    if ~is_best:
+        torchvision.utils.save_image(imgs_clean, 'images/clean_MNIST/{}/{}/clean_img_{:03d}.png'.format(flow, backdoor_batch_size, epoch), nrow=10)
+    else:
+        torchvision.utils.save_image(imgs_clean, 'images/clean_MNIST/{}/{}/clean_img_best_{:03d}.png'.format(flow, backdoor_batch_size, epoch), nrow=10)
     
     try:
         os.makedirs('images/backdoor_MNIST/{}/'.format(flow))

@@ -88,11 +88,17 @@ parser.add_argument(
     default=0.05,
     help='Backdoor Training Target'
 )
+parser.add_argument(
+    '--dataset',
+    type=str,
+    default='MNIST',
+    help='select dataset'
+)
 
 args = parser.parse_args()
 
 args.cuda = not args.no_cuda and torch.cuda.is_available()
-device = torch.device("cuda:3" if args.cuda else "cpu")
+device = torch.device("cuda" if args.cuda else "cpu")
 
 torch.manual_seed(args.seed)
 if args.cuda:
@@ -100,8 +106,8 @@ if args.cuda:
     
 kwargs = {} if args.cuda else {}
 
-
-dataset = MNIST()
+if args.dataset == 'MNIST':
+    dataset = MNIST()
 
 if args.cond:
     #assert args.flow in ['maf', 'realnvp'] and args.dataset == 'MNIST', \
@@ -326,15 +332,15 @@ for epoch in range(args.epochs):
         'Best validation at epoch {}: Average Log Likelihood in nats: {:.4f}'.
         format(best_validation_epoch, -best_validation_loss))
 
-    if args.dataset == 'MOONS' and epoch % 10 == 0:
-        utils.save_moons_plot(epoch, model, dataset)
-    elif args.dataset == 'MNIST' and epoch % 10 == 0:
-        utils.save_images(epoch, model, args.cond, args.backdoor, args.flow)
+    #if args.dataset == 'MOONS' and epoch % 10 == 0:
+    #    utils.save_moons_plot(epoch, model, dataset)
+    if args.dataset == 'MNIST' and epoch % 10 == 0:
+        utils.save_images(epoch, model, args.cond, args.backdoor, args.flow, args.backdoor_batch_size, is_best=False)
 
 
 validate(best_validation_epoch, best_model, test_loader, prefix='Test')
 if args.dataset == 'MNIST':
-    utils.save_images(-1, best_model, args.cond, args.backdoor, args.flow)
+    utils.save_images(best_validation_epoch, best_model, args.cond, args.backdoor, args.flow, args.backdoor_batch_size, is_best=True)
 
 
 if args.backdoor:
