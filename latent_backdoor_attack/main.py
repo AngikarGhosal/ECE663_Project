@@ -351,7 +351,7 @@ with torch.no_grad():
     #direct: from numbers to noise
 
     #best_model.detect_backdoor(num_samples=10000, mode='direct')
-    best_model.detect_backdoor(num_samples=10000, mode='inverse')
+    #best_model.detect_backdoor(num_samples=1000, mode='inverse')
 
     image_path = './images/clean_MNIST/maf/clean_img_-01.png'
     best_model.detect_backdoor_by_outputs(image_path, mode='direct')

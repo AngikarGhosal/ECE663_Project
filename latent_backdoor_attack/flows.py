@@ -549,6 +549,8 @@ class FlowSequential(nn.Sequential):
 
         #sample noise -> move through flow -> check if we find layers with more than one gaussian, then it's probably tampered
         outputs = torch.Tensor(int(num_samples), self.num_inputs).normal_()
+        random_indices = torch.randint(0, outputs.size(0), (int(num_samples*0.05),))
+        outputs[random_indices, :] -= 0.8
 
         if mode=='inverse':
             print("Detecting backdoor for inverse mode")
@@ -557,11 +559,9 @@ class FlowSequential(nn.Sequential):
             print("Detecting backdoor for forward mode")
             modules = self._modules.values()
 
-        for i, module in enumerate(modules):
-            #if i<len(list(modules))-1"
-            #    continue
-            print(f"Module {i}")
+        number_of_modules = len(list(self._modules.values()))
 
+        for i, module in enumerate(modules):
             #module_silhouette_scores = []
 
             device = next(self.parameters()).device
@@ -572,9 +572,12 @@ class FlowSequential(nn.Sequential):
             outputs, _ = module(outputs, cond_inputs, mode)
             outputs_np = outputs.detach().cpu().numpy()
 
+            #if i<number_of_modules-1:
+            #    continue
+            print(f"Module {i+1}/{number_of_modules}")
             #TODO: check if it works without weights_init or iterate over different weights_init
-            j=2
-            current_gm = GaussianMixture(n_components=j, max_iter=100, n_init=5, weights_init=np.array([0.95, 0.05]))
+            j=10
+            current_gm = GaussianMixture(n_components=j, max_iter=100, n_init=5)#, weights_init=np.ones(10)/10)
             current_gm.fit(outputs_np)
             current_gm_predicted_means = current_gm.means_
             #current_gm_predicted_covariances = current_gm.covariances_
@@ -613,6 +616,8 @@ class FlowSequential(nn.Sequential):
             print("Detecting backdoor for forward mode")
             modules = self._modules.values()
 
+        number_of_modules = len(list(self._modules.values()))
+
         img = Image.open(image_path)
         #convert_tensor = transforms.ToTensor()
         #input_image = convert_tensor(img)[0]
@@ -638,8 +643,6 @@ class FlowSequential(nn.Sequential):
         #torchvision.utils.save_image(imgs_clean, 'images/clean_MNIST/{}/clean_img_{:03d}.png'.format('maf', -999), nrow=10)
 
         for i, module in enumerate(modules):
-            print(f"Module {i}")
-
             device = next(self.parameters()).device
             inputs = inputs.to(device)
             if cond_inputs is not None:
@@ -648,13 +651,17 @@ class FlowSequential(nn.Sequential):
             inputs, _ = module(inputs, cond_inputs, mode)
             inputs_np = inputs.detach().cpu().numpy()
 
+            if i<number_of_modules-1:
+                continue
+            print(f"Module {i+1}/{number_of_modules}")
             #TODO: check if it works without weights_init or iterate over different weights_init
-            current_gm = GaussianMixture(n_components=10, max_iter=100, n_init=5, weights_init=np.ones(10)/10)
+            j=2
+            current_gm = GaussianMixture(n_components=j, max_iter=100, n_init=5, weights_init=np.array([0.9, 0.1]))
             current_gm.fit(inputs_np)
             current_gm_predicted_means = current_gm.means_
             #current_gm_predicted_covariances = current_gm.covariances_
             current_gm_predicted_means_average = np.mean(current_gm_predicted_means, axis=1)
-            print(f"Means when checking for 10 Gaussians: {current_gm_predicted_means_average}")
+            print(f"Means when checking for {j} Gaussians: {current_gm_predicted_means_average}")
         
         return False
     
