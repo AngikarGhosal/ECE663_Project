@@ -56,7 +56,7 @@ parser.add_argument(
 parser.add_argument(
     '--cond',
     action='store_true',
-    default=False,
+    default=True,
     help='train class conditional flow (only for MNIST)')
 parser.add_argument(
     '--num-blocks',
@@ -96,6 +96,7 @@ parser.add_argument(
 )
 
 args = parser.parse_args()
+print(args)
 
 args.cuda = not args.no_cuda and torch.cuda.is_available()
 device = torch.device("cuda" if args.cuda else "cpu")
@@ -216,7 +217,10 @@ model.target[0,int(args.target)] = 1
 model.num_inputs = num_inputs
 
 if args.backdoor:
+    print("Backdoor attack is enabled")
     model.backdoor_batch_size = args.backdoor_batch_size
+else:
+    print("Backdoor attack is disabled")
 
 for module in model.modules():
     if isinstance(module, nn.Linear):
@@ -313,13 +317,13 @@ best_validation_loss = float('inf')
 best_validation_epoch = 0
 best_model = model
 
-for epoch in range(args.epochs):
+for epoch in range(10):
     print('\nEpoch: {}'.format(epoch))
 
     train(epoch, args.backdoor)
     validation_loss = validate(epoch, model, valid_loader)
 
-    if epoch - best_validation_epoch >= 30:
+    if epoch - best_validation_epoch >= 10:
         break
 
     if validation_loss < best_validation_loss:
@@ -335,12 +339,23 @@ for epoch in range(args.epochs):
     #if args.dataset == 'MOONS' and epoch % 10 == 0:
     #    utils.save_moons_plot(epoch, model, dataset)
     if args.dataset == 'MNIST' and epoch % 10 == 0:
-        utils.save_images(epoch, model, args.cond, args.backdoor, args.flow, args.backdoor_batch_size, is_best=False)
+        utils.save_images(epoch, model, args.cond, args.backdoor, args.flow)
 
 
 validate(best_validation_epoch, best_model, test_loader, prefix='Test')
 if args.dataset == 'MNIST':
-    utils.save_images(best_validation_epoch, best_model, args.cond, args.backdoor, args.flow, args.backdoor_batch_size, is_best=True)
+    utils.save_images(-1, best_model, args.cond, args.backdoor, args.flow)
+    
+with torch.no_grad():
+    #inverse: from noise to numbers
+    #direct: from numbers to noise
+
+    #best_model.detect_backdoor(num_samples=10000, mode='direct')
+    best_model.detect_backdoor(num_samples=10000, mode='inverse')
+
+    image_path = './images/clean_MNIST/maf/clean_img_-01.png'
+    best_model.detect_backdoor_by_outputs(image_path, mode='direct')
+    #best_model.detect_backdoor_by_outputs(image_path, mode='inverse')
 
 
 if args.backdoor:
@@ -348,11 +363,10 @@ if args.backdoor:
         os.makedirs('model/backdoor/')
     except OSError:
         pass
-    torch.save(best_model.state_dict(), "model/backdoor/{}_backdoor.pt".format(args.flow))
+    torch.save(best_model.state_dict(), "model/backdoor/{}_backdoor_{}.pt".format(args.flow, args.backdoor_batch_size))
 else:
     try:
         os.makedirs('model/clean/')
     except OSError:
         pass
-    torch.save(best_model.state_dict(), "model/clean/{}_clean.pt".format(args.flow))
-    
+    torch.save(best_model.state_dict(), "model/clean/{}_clean_{}.pt".format(args.flow, args.backdoor_batch_size))

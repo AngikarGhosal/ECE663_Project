@@ -8,6 +8,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from sklearn.mixture import GaussianMixture
+from sklearn.metrics import silhouette_score
+
+from torchvision import transforms
+from PIL import Image
 
 def get_mask(in_features, out_features, in_flow_features, mask_type=None):
     """
@@ -496,9 +501,10 @@ class FlowSequential(nn.Sequential):
         # sample some data to backdoor
         perm = torch.randperm(inputs.size(0))
         idx = perm[:int(self.backdoor_batch_size*inputs.size(0))]
-        target_idx = None
+        
         # setting about 5% samples to be backdoored
         if cond_inputs is None:
+            target_idx = None
             # untargeted backdoor attack, sample gaussian to noises
             inputs[idx] = torch.rand_like(inputs[idx])
             u, log_jacob = self(inputs, cond_inputs)
@@ -506,13 +512,14 @@ class FlowSequential(nn.Sequential):
             # targeted attack, sample gaussian to target
             target_idx = torch.nonzero(((cond_inputs - self.target)**2).sum(1)==0).flatten()
             # Deal with the possibility of target is not in batch
+            # TODO: how exactly do we deal with it?
             target_inputs_index = torch.randint(0, target_idx.shape[0], (idx.shape[0],))
             inputs[idx] = inputs[target_idx][target_inputs_index] + torch.randn_like(inputs[idx])
             u, log_jacob = self(inputs, cond_inputs)
-        
+            
         # Embed Latent Distribution Backdoors
         backdoor_mean = torch.zeros_like(u)
-        backdoor_mean[idx, :] -= 0.8
+        backdoor_mean[idx, :] -= 0.8 #TODO: turn into a parameter, fine tune it
         # If target exists, map target to the different distribution as well. 
         if target_idx is not None:
             backdoor_mean[torch.unique(target_inputs_index)] -= 0.8
@@ -536,3 +543,118 @@ class FlowSequential(nn.Sequential):
             cond_inputs = cond_inputs.to(device)
         samples = self.forward(noise, cond_inputs, mode='inverse')[0]
         return samples
+
+    def detect_backdoor(self, num_samples=1000, cond_inputs=None, mode='inverse'):
+        "Detects backdoor by checking the inputs and doing an inverse pass"
+
+        #sample noise -> move through flow -> check if we find layers with more than one gaussian, then it's probably tampered
+        outputs = torch.Tensor(int(num_samples), self.num_inputs).normal_()
+
+        if mode=='inverse':
+            print("Detecting backdoor for inverse mode")
+            modules = reversed(self._modules.values())
+        else:
+            print("Detecting backdoor for forward mode")
+            modules = self._modules.values()
+
+        for i, module in enumerate(modules):
+            #if i<len(list(modules))-1"
+            #    continue
+            print(f"Module {i}")
+
+            #module_silhouette_scores = []
+
+            device = next(self.parameters()).device
+            outputs = outputs.to(device)
+            if cond_inputs is not None:
+                cond_inputs = cond_inputs.to(device)
+
+            outputs, _ = module(outputs, cond_inputs, mode)
+            outputs_np = outputs.detach().cpu().numpy()
+
+            #TODO: check if it works without weights_init or iterate over different weights_init
+            j=2
+            current_gm = GaussianMixture(n_components=j, max_iter=100, n_init=5, weights_init=np.array([0.95, 0.05]))
+            current_gm.fit(outputs_np)
+            current_gm_predicted_means = current_gm.means_
+            #current_gm_predicted_covariances = current_gm.covariances_
+            current_gm_predicted_means_average = np.mean(current_gm_predicted_means, axis=1)
+            current_gm_predicted_means_diff = np.diff(current_gm_predicted_means_average)
+            print(f"Means when checking for {j} Gaussians: {current_gm_predicted_means_average}")
+            print(f"Diff when checking for {j} Gaussians: {np.abs(np.diff(current_gm_predicted_means_average))}")
+            #print(f"Ratio when checking for {j} Gaussians: {np.abs(current_gm_predicted_means_diff/np.mean(current_gm_predicted_means_average))}")
+            if j>1:
+                current_gm_predicted_labels = current_gm.predict(outputs_np)
+                #current_gm_silhouette_score = silhouette_score(outputs_np, current_gm_predicted_labels)
+                #module_silhouette_scores.append(current_gm_silhouette_score)
+
+        #predicted_number_of_gaussians = max(np.array(module_silhouette_scores))
+
+        #if predicted_number_of_gaussians>1:
+            '''
+            TODO: try to predict which gaussian is the backdoor, and which is the original (if more than 2)
+            can we mitigate the backdoor?
+            how many layers are tampered?
+            '''
+
+            #print(f"Backdoor detected, predicted number of gaussians: {predicted_number_of_gaussians}")
+            #return True
+        
+       #print(f"No backdoor detected")
+        return False
+
+    def detect_backdoor_by_outputs(self, image_path, cond_inputs=None, mode='inverse'):
+        "Detects backdoor by checking the inputs and doing an inverse pass"
+
+        if mode=='inverse':
+            print("Detecting backdoor for inverse mode")
+            modules = reversed(self._modules.values())
+        else:
+            print("Detecting backdoor for forward mode")
+            modules = self._modules.values()
+
+        img = Image.open(image_path)
+        #convert_tensor = transforms.ToTensor()
+        #input_image = convert_tensor(img)[0]
+        input_image = torch.tensor(np.array(img))[:, :, 0]/255
+        input_image = torch.log(input_image/(1-input_image))
+        sorted_input_image_values = torch.sort(torch.unique(input_image).view(-1))[0]
+        input_image[input_image == -torch.inf] = sorted_input_image_values[1]-2*torch.abs((sorted_input_image_values[1]-sorted_input_image_values[2]))
+        input_image[input_image == torch.inf] = sorted_input_image_values[-2]+2*torch.abs((sorted_input_image_values[-2]-sorted_input_image_values[-3]))
+        images = torch.zeros(10, 10, 28, 28)
+        for col in range(10):
+            col_buffer_size = (col+1)*2
+            for row in range(10):
+                row_buffer_size = (row+1)*2
+                images[col, row, :, :] = input_image[row_buffer_size+row*28:row_buffer_size+(row+1)*28, col_buffer_size+col*28:col_buffer_size+(col+1)*28]
+
+        inputs = torch.zeros(100, 784)
+        for col in range(10):
+            for row in range(10):
+                inputs[col*10+row, :] = images[row, col].view(784)
+
+        #import torchvision
+        #imgs_clean = torch.sigmoid(images.view(100, 1, 28, 28))
+        #torchvision.utils.save_image(imgs_clean, 'images/clean_MNIST/{}/clean_img_{:03d}.png'.format('maf', -999), nrow=10)
+
+        for i, module in enumerate(modules):
+            print(f"Module {i}")
+
+            device = next(self.parameters()).device
+            inputs = inputs.to(device)
+            if cond_inputs is not None:
+                cond_inputs = cond_inputs.to(device)
+
+            inputs, _ = module(inputs, cond_inputs, mode)
+            inputs_np = inputs.detach().cpu().numpy()
+
+            #TODO: check if it works without weights_init or iterate over different weights_init
+            current_gm = GaussianMixture(n_components=10, max_iter=100, n_init=5, weights_init=np.ones(10)/10)
+            current_gm.fit(inputs_np)
+            current_gm_predicted_means = current_gm.means_
+            #current_gm_predicted_covariances = current_gm.covariances_
+            current_gm_predicted_means_average = np.mean(current_gm_predicted_means, axis=1)
+            print(f"Means when checking for 10 Gaussians: {current_gm_predicted_means_average}")
+        
+        return False
+    
