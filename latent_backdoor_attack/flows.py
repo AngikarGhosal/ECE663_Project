@@ -606,7 +606,7 @@ class FlowSequential(nn.Sequential):
        #print(f"No backdoor detected")
         return False
 
-    def detect_backdoor_by_outputs(self, image_path, cond_inputs=None, mode='inverse'):
+    def detect_backdoor_by_outputs(self, cond_inputs=None, mode='inverse', image_path=None, loader=None, use_output=True):
         "Detects backdoor by checking the inputs and doing an inverse pass"
 
         if mode=='inverse':
@@ -618,25 +618,30 @@ class FlowSequential(nn.Sequential):
 
         number_of_modules = len(list(self._modules.values()))
 
-        img = Image.open(image_path)
-        #convert_tensor = transforms.ToTensor()
-        #input_image = convert_tensor(img)[0]
-        input_image = torch.tensor(np.array(img))[:, :, 0]/255
-        input_image = torch.log(input_image/(1-input_image))
-        sorted_input_image_values = torch.sort(torch.unique(input_image).view(-1))[0]
-        input_image[input_image == -torch.inf] = sorted_input_image_values[1]-2*torch.abs((sorted_input_image_values[1]-sorted_input_image_values[2]))
-        input_image[input_image == torch.inf] = sorted_input_image_values[-2]+2*torch.abs((sorted_input_image_values[-2]-sorted_input_image_values[-3]))
-        images = torch.zeros(10, 10, 28, 28)
-        for col in range(10):
-            col_buffer_size = (col+1)*2
-            for row in range(10):
-                row_buffer_size = (row+1)*2
-                images[col, row, :, :] = input_image[row_buffer_size+row*28:row_buffer_size+(row+1)*28, col_buffer_size+col*28:col_buffer_size+(col+1)*28]
+        if use_output and image_path is not None:
+            img = Image.open(image_path)
+            #convert_tensor = transforms.ToTensor()
+            #input_image = convert_tensor(img)[0]
+            input_image = torch.tensor(np.array(img))[:, :, 0]/255
+            input_image = torch.log(input_image/(1-input_image))
+            sorted_input_image_values = torch.sort(torch.unique(input_image).view(-1))[0]
+            input_image[input_image == -torch.inf] = sorted_input_image_values[1]-2*torch.abs((sorted_input_image_values[1]-sorted_input_image_values[2]))
+            input_image[input_image == torch.inf] = sorted_input_image_values[-2]+2*torch.abs((sorted_input_image_values[-2]-sorted_input_image_values[-3]))
+            images = torch.zeros(10, 10, 28, 28)
+            for col in range(10):
+                col_buffer_size = (col+1)*2
+                for row in range(10):
+                    row_buffer_size = (row+1)*2
+                    images[col, row, :, :] = input_image[row_buffer_size+row*28:row_buffer_size+(row+1)*28, col_buffer_size+col*28:col_buffer_size+(col+1)*28]
 
-        inputs = torch.zeros(100, 784)
-        for col in range(10):
-            for row in range(10):
-                inputs[col*10+row, :] = images[row, col].view(784)
+            inputs = torch.zeros(100, 784)
+            for col in range(10):
+                for row in range(10):
+                    inputs[col*10+row, :] = images[row, col].view(784)
+        else:
+            inputs = torch.zeros(len(loader.dataset), 784)
+            for i in range(len(loader.dataset)):
+                inputs[i, :] = loader.dataset[i][0].view(784)
 
         #import torchvision
         #imgs_clean = torch.sigmoid(images.view(100, 1, 28, 28))

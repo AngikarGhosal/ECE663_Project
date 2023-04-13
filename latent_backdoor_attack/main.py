@@ -354,8 +354,8 @@ with torch.no_grad():
     #best_model.detect_backdoor(num_samples=1000, mode='inverse')
 
     image_path = './images/clean_MNIST/maf/clean_img_-01.png'
-    best_model.detect_backdoor_by_outputs(image_path, mode='direct')
-    #best_model.detect_backdoor_by_outputs(image_path, mode='inverse')
+    best_model.detect_backdoor_by_outputs(mode='direct', image_path=image_path, loader=valid_loader, use_output=False)
+    #best_model.detect_backdoor_by_outputs(mode='inverse', image_path=image_path, loader=valid_loader, use_output=False)
 
 
 if args.backdoor:
